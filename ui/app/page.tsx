@@ -50,7 +50,7 @@ function highestSeverityInstrument(flags: Flag[]): string | null {
 }
 
 export default function Home() {
-  const { flags, allFlags, narrative, entries, lastUpdated, status } = useArgusStream();
+  const { flags, allFlags, entries, lastUpdated, status } = useArgusStream();
   const feedRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
