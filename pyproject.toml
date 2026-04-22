@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "argus"
+version = "0.1.0"
+description = "Real-time market intelligence system"
+authors = ["arya"]
+packages = [{ include = "argus" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+anthropic = "^0.25"
+httpx = "^0.27"
+aiohttp = "^3.9"
+feedparser = "^6.0"
+python-telegram-bot = "^21.0"
+transformers = "^4.40"
+torch = "^2.2"
+pandas = "^2.2"
+numpy = "^1.26"
+fastapi = "^0.111"
+uvicorn = "^0.29"
+pydantic = "^2.7"
+python-dotenv = "^1.0"
+cryptography = "^42.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
