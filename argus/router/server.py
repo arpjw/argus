@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from argus.config import ANTHROPIC_API_KEY
 from argus.connectors import fred as fred_connector
 from argus.connectors import kalshi as kalshi_connector
+import argus.coordinator.main as coordinator_module
 from argus.coordinator.main import broadcast_queue, run as coordinator_run
 from argus.synthesis.claude import SynthesisResult
 
@@ -49,6 +50,14 @@ class AnalyzeRequest(BaseModel):
 @app.get("/health")
 async def health():
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+
+
+@app.get("/kalshi")
+async def kalshi():
+    snap = coordinator_module.latest_kalshi_snapshot
+    if snap is None:
+        return {"markets": []}
+    return snap.payload
 
 
 @app.get("/stream")
