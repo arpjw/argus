@@ -1,9 +1,12 @@
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime
 
 import anthropic
+import pandas as pd
+import yfinance as yf
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -30,6 +33,8 @@ app.add_middleware(
 
 latest_synthesis: SynthesisResult | None = None
 
+_search_cache: dict[str, tuple[float, dict]] = {}
+
 _anthropic_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 
 ANALYZE_SYSTEM_PROMPT = (
@@ -51,6 +56,76 @@ class AnalyzeRequest(BaseModel):
 @app.get("/health")
 async def health():
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+
+
+@app.get("/prices/search")
+async def search_prices(ticker: str):
+    ticker = ticker.upper()
+    now = time.time()
+    if ticker in _search_cache:
+        ts, cached = _search_cache[ticker]
+        if now - ts < 60:
+            return cached
+
+    try:
+        def _get_fast_info():
+            return yf.Ticker(ticker).fast_info
+
+        df, fast_info = await asyncio.gather(
+            asyncio.to_thread(
+                yf.download, ticker, period="5d", interval="5m",
+                progress=False, auto_adjust=True
+            ),
+            asyncio.to_thread(_get_fast_info),
+        )
+
+        if df is None or df.empty:
+            result = {"valid": False, "ticker": ticker}
+            _search_cache[ticker] = (time.time(), result)
+            return result
+
+        if isinstance(df.columns, pd.MultiIndex):
+            df = df.droplevel(1, axis=1)
+
+        for col in ("Open", "High", "Low", "Close", "Volume"):
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+        df = df.dropna(subset=["Close"])
+
+        if df.empty:
+            result = {"valid": False, "ticker": ticker}
+            _search_cache[ticker] = (time.time(), result)
+            return result
+
+        bars = []
+        for ts_val, row in df.iterrows():
+            bars.append({
+                "timestamp": ts_val.isoformat(),
+                "open": float(row["Open"]),
+                "high": float(row["High"]),
+                "low": float(row["Low"]),
+                "close": float(row["Close"]),
+                "volume": float(row.get("Volume", 0) or 0),
+            })
+
+        name = getattr(fast_info, "long_name", None) or ticker
+        exchange = getattr(fast_info, "exchange", "") or ""
+
+        result = {
+            "valid": True,
+            "ticker": ticker,
+            "name": name,
+            "exchange": exchange,
+            "bars": bars,
+        }
+        _search_cache[ticker] = (time.time(), result)
+        return result
+
+    except Exception as exc:
+        logger.warning("search_prices failed for %s: %s", ticker, exc)
+        result = {"valid": False, "ticker": ticker}
+        _search_cache[ticker] = (time.time(), result)
+        return result
 
 
 @app.get("/prices/{instrument}")

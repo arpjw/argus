@@ -78,9 +78,10 @@ interface ArgusChartProps {
   instrument: string;
   flags: Flag[];
   timeRange: TimeRange;
+  initialBars?: any[];
 }
 
-export default function ArgusChart({ instrument, flags, timeRange }: ArgusChartProps) {
+export default function ArgusChart({ instrument, flags, timeRange, initialBars }: ArgusChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -152,57 +153,67 @@ export default function ArgusChart({ instrument, flags, timeRange }: ArgusChartP
     };
   }, []);
 
-  // Fetch real price data, poll every 60s, fall back to synthetic on error
+  // Load and poll price data via search endpoint; use initialBars if provided
   useEffect(() => {
     const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+    // Apply initialBars immediately when instrument changes
+    if (initialBars && initialBars.length > 0) {
+      const mapped: CandlestickData<Time>[] = (initialBars as Array<{
+        timestamp: string; open: number; high: number; low: number; close: number;
+      }>)
+        .map((b) => ({
+          time: Math.floor(new Date(b.timestamp).getTime() / 1000) as Time,
+          open: b.open, high: b.high, low: b.low, close: b.close,
+        }))
+        .sort((a, b) => (a.time as number) - (b.time as number));
+      barsRef.current = mapped;
+      prevBarCountRef.current = mapped.length;
+      seriesRef.current?.setData(mapped);
+      chartRef.current?.timeScale().fitContent();
+      setLoading(false);
+    }
+
     const loadData = async () => {
-      setLoading(true);
+      if (!initialBars || initialBars.length === 0) setLoading(true);
       try {
-        const res = await fetch(`${apiBase}/prices/${instrument}`);
+        const res = await fetch(`${apiBase}/prices/search?ticker=${encodeURIComponent(instrument)}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        const rawBars = (data.bars ?? []) as Array<{
-          timestamp: string;
-          open: number;
-          high: number;
-          low: number;
-          close: number;
+        if (!data.valid || !data.bars?.length) throw new Error("empty");
+
+        const rawBars = data.bars as Array<{
+          timestamp: string; open: number; high: number; low: number; close: number;
         }>;
-
-        if (rawBars.length === 0) throw new Error("empty");
-
         const mapped: CandlestickData<Time>[] = rawBars
           .map((b) => ({
             time: Math.floor(new Date(b.timestamp).getTime() / 1000) as Time,
-            open: b.open,
-            high: b.high,
-            low: b.low,
-            close: b.close,
+            open: b.open, high: b.high, low: b.low, close: b.close,
           }))
           .sort((a, b) => (a.time as number) - (b.time as number));
 
         const prevCount = prevBarCountRef.current;
         barsRef.current = mapped;
         seriesRef.current?.setData(mapped);
-
         if (mapped.length !== prevCount) {
           chartRef.current?.timeScale().fitContent();
         }
         prevBarCountRef.current = mapped.length;
       } catch {
-        const bars = generateBars(instrument, 200);
-        barsRef.current = bars;
-        prevBarCountRef.current = bars.length;
-        seriesRef.current?.setData(bars);
-        const range = getVisibleRange(bars, timeRange);
-        chartRef.current?.timeScale().setVisibleRange(range);
+        if (barsRef.current.length === 0) {
+          const bars = generateBars(instrument, 200);
+          barsRef.current = bars;
+          prevBarCountRef.current = bars.length;
+          seriesRef.current?.setData(bars);
+          const range = getVisibleRange(bars, timeRange);
+          chartRef.current?.timeScale().setVisibleRange(range);
+        }
       } finally {
         setLoading(false);
       }
     };
 
-    loadData();
+    if (!initialBars || initialBars.length === 0) loadData();
     const id = setInterval(loadData, 60_000);
     return () => clearInterval(id);
   }, [instrument]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -219,7 +230,10 @@ export default function ArgusChart({ instrument, flags, timeRange }: ArgusChartP
     if (!markersRef.current || barsRef.current.length === 0) return;
 
     const lastBar = barsRef.current[barsRef.current.length - 1];
-    const relevantFlags = flags.filter((f) => f.instrument === instrument);
+    const instrBase = instrument.replace(/=F$/, "").replace(/-USD$/, "");
+    const relevantFlags = flags.filter(
+      (f) => f.instrument === instrument || f.instrument === instrBase
+    );
 
     const markers: SeriesMarker<Time>[] = relevantFlags.map((flag) => {
       const color =

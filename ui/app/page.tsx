@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { useArgusStream, type Flag, type FlagEntry } from "../hooks/useArgusStream";
 import { useAnalysis } from "../hooks/useAnalysis";
@@ -8,13 +8,23 @@ import KalshiStrip from "../components/KalshiStrip";
 
 const ArgusChart = dynamic(() => import("../components/ArgusChart"), { ssr: false });
 
-const INSTRUMENTS = [
-  "ES", "NQ", "RTY", "YM",
-  "CL", "NG", "GC", "SI",
-  "ZB", "ZN", "ZC", "ZS", "ZW",
-  "6E", "6J", "6B", "6A",
-  "HG", "VX", "BTC",
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+const WATCHLIST = [
+  "ES=F", "NQ=F", "RTY=F", "YM=F",
+  "CL=F", "NG=F", "GC=F", "SI=F",
+  "ZB=F", "ZN=F", "ZC=F", "ZS=F", "ZW=F",
+  "6E=F", "6J=F", "6B=F", "6A=F",
+  "HG=F", "VX=F", "BTC-USD",
 ] as const;
+
+const SHORT_TO_TICKER: Record<string, string> = {
+  "ES": "ES=F", "NQ": "NQ=F", "RTY": "RTY=F", "YM": "YM=F",
+  "CL": "CL=F", "NG": "NG=F", "GC": "GC=F", "SI": "SI=F",
+  "ZB": "ZB=F", "ZN": "ZN=F", "ZC": "ZC=F", "ZS": "ZS=F", "ZW": "ZW=F",
+  "6E": "6E=F", "6J": "6J=F", "6B": "6B=F", "6A": "6A=F",
+  "HG": "HG=F", "VX": "VX=F", "BTC": "BTC-USD",
+};
 
 type TimeRange = "1H" | "4H" | "1D";
 
@@ -41,14 +51,6 @@ type AnalysisEntry = {
   text: string;
 };
 
-function highestSeverityInstrument(flags: Flag[]): string | null {
-  const order = { high: 3, medium: 2, low: 1 };
-  if (flags.length === 0) return null;
-  return flags.reduce((best, f) =>
-    order[f.severity] > order[best.severity] ? f : best
-  ).instrument;
-}
-
 export default function Home() {
   const { flags, allFlags, entries, lastUpdated, status } = useArgusStream();
   const feedRef = useRef<HTMLDivElement>(null);
@@ -60,6 +62,7 @@ export default function Home() {
       el.scrollTo({ top: 0, behavior: "smooth" });
     }
   }, [entries.length]);
+
   const { analyze, response, isStreaming, error } = useAnalysis();
 
   const [activeTab, setActiveTab] = useState<"FLAGS" | "ANALYZE">("FLAGS");
@@ -68,18 +71,73 @@ export default function Home() {
   const [history, setHistory] = useState<AnalysisEntry[]>([]);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
-  const [selectedInstrument, setSelectedInstrument] = useState<string>("ES");
   const [timeRange, setTimeRange] = useState<TimeRange>("1D");
-  const manualSelectionRef = useRef(false);
 
-  // Auto-select instrument with highest severity flag, unless user manually chose one
+  // Search state
+  const [searchInput, setSearchInput] = useState("");
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [recentTickers, setRecentTickers] = useState<string[]>([]);
+  const [selectedTicker, setSelectedTicker] = useState("ES=F");
+  const [selectedName, setSelectedName] = useState("E-mini S&P 500");
+  const [selectedBars, setSelectedBars] = useState<any[] | null>(null);
+  const debounceRef = useRef<NodeJS.Timeout>();
+
+  // Load recent tickers from localStorage on mount
   useEffect(() => {
-    if (manualSelectionRef.current) return;
-    const top = highestSeverityInstrument(flags);
-    if (top && INSTRUMENTS.includes(top as (typeof INSTRUMENTS)[number])) {
-      setSelectedInstrument(top);
+    try {
+      const stored = localStorage.getItem("argus_recent_tickers");
+      if (stored) setRecentTickers(JSON.parse(stored));
+    } catch {}
+  }, []);
+
+  const performSearch = useCallback(async (ticker: string) => {
+    if (!ticker.trim()) {
+      setSearchError(null);
+      return;
     }
-  }, [flags]);
+    setSearchLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/prices/search?ticker=${encodeURIComponent(ticker)}`);
+      const data = await res.json();
+      if (data.valid && data.bars?.length) {
+        setSelectedTicker(data.ticker);
+        setSelectedName(data.name || data.ticker);
+        setSelectedBars(data.bars);
+        setSearchError(null);
+        setRecentTickers((prev) => {
+          const updated = [data.ticker, ...prev.filter((t) => t !== data.ticker)].slice(0, 5);
+          try { localStorage.setItem("argus_recent_tickers", JSON.stringify(updated)); } catch {}
+          return updated;
+        });
+      } else {
+        setSearchError("Ticker not found");
+      }
+    } catch {
+      setSearchError("Search failed");
+    } finally {
+      setSearchLoading(false);
+    }
+  }, []);
+
+  // Debounce search on input change
+  useEffect(() => {
+    clearTimeout(debounceRef.current);
+    if (!searchInput.trim()) {
+      setSearchError(null);
+      return;
+    }
+    debounceRef.current = setTimeout(() => {
+      performSearch(searchInput);
+    }, 400);
+    return () => clearTimeout(debounceRef.current);
+  }, [searchInput, performSearch]);
+
+  function handleChipClick(ticker: string) {
+    clearTimeout(debounceRef.current);
+    setSearchInput(ticker);
+    performSearch(ticker);
+  }
 
   async function handleAnalyze() {
     if (!inputText.trim() || isStreaming) return;
@@ -91,6 +149,11 @@ export default function Home() {
       );
     }
   }
+
+  const showChips = !(searchInput.trim() && searchLoading);
+
+  // Derive short ticker for KalshiStrip
+  const shortTicker = selectedTicker.replace(/=F$/, "").replace(/-USD$/, "");
 
   return (
     <div className="flex flex-col h-screen" style={{ color: "#e5e5e5" }}>
@@ -116,7 +179,6 @@ export default function Home() {
           className="w-1/4 flex flex-col border-r overflow-hidden"
           style={{ borderColor: "#1f1f1f", background: "#0d0d0d" }}
         >
-          {/* Sticky header */}
           <div
             className="flex items-center justify-between px-4 py-2 border-b shrink-0"
             style={{ borderColor: "#1f1f1f" }}
@@ -134,7 +196,6 @@ export default function Home() {
             )}
           </div>
 
-          {/* Scrollable feed */}
           <div ref={feedRef} className="flex-1 overflow-y-auto">
             {entries.length === 0 ? (
               <div className="flex items-center justify-center gap-2 h-full" style={{ color: "#555" }}>
@@ -189,13 +250,13 @@ export default function Home() {
           className="w-1/2 flex flex-col overflow-hidden"
           style={{ background: "#0a0a0a" }}
         >
-          {/* Panel header: instrument + time range */}
+          {/* Panel header: ticker name + time range */}
           <div
             className="flex items-center justify-between px-4 py-2 border-b shrink-0"
             style={{ borderColor: "#1f1f1f" }}
           >
-            <span className="text-sm font-semibold tracking-widest" style={{ color: "#e5e5e5" }}>
-              {selectedInstrument}
+            <span className="text-sm font-mono" style={{ color: "#e5e5e5" }}>
+              {selectedTicker} · {selectedName}
             </span>
             <div className="flex items-center gap-1">
               {(["1H", "4H", "1D"] as TimeRange[]).map((r) => (
@@ -215,49 +276,116 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Instrument chips */}
+          {/* Search input */}
           <div
-            className="flex items-center gap-1 px-3 py-2 border-b shrink-0 overflow-x-auto"
-            style={{ borderColor: "#1f1f1f", scrollbarWidth: "none" }}
+            className="px-3 pt-2 pb-1 border-b shrink-0"
+            style={{ borderColor: "#1f1f1f" }}
           >
-            {INSTRUMENTS.map((ticker) => {
-              const hasFlag = flags.some((f) => f.instrument === ticker);
-              const flagSeverity = flags.find((f) => f.instrument === ticker)?.severity;
-              const chipColor = flagSeverity === "high"
-                ? "#7f1d1d"
-                : flagSeverity === "medium"
-                ? "#78350f"
-                : hasFlag
-                ? "#1f2937"
-                : "transparent";
-              const isActive = selectedInstrument === ticker;
-              return (
-                <button
-                  key={ticker}
-                  onClick={() => {
-                    setSelectedInstrument(ticker);
-                    manualSelectionRef.current = true;
-                  }}
-                  className="px-2 py-0.5 rounded text-xs font-mono shrink-0"
-                  style={{
-                    background: isActive ? "#e5e5e5" : chipColor,
-                    color: isActive ? "#0a0a0a" : hasFlag ? "#e5e5e5" : "#666",
-                    border: "1px solid",
-                    borderColor: isActive ? "#e5e5e5" : hasFlag ? "#333" : "#1f1f1f",
-                  }}
+            <div className="relative">
+              <input
+                type="text"
+                value={searchInput}
+                onChange={(e) => {
+                  setSearchInput(e.target.value);
+                  if (searchError) setSearchError(null);
+                }}
+                placeholder="Search any ticker — NVDA, SPY, BTC-USD, ES=F..."
+                className="w-full px-3 py-1.5 text-xs rounded font-mono"
+                style={{
+                  background: "#111",
+                  border: "1px solid #222",
+                  color: "#e5e5e5",
+                  outline: "none",
+                  paddingRight: searchLoading ? "2rem" : undefined,
+                }}
+              />
+              {searchLoading && (
+                <span
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-xs animate-spin"
+                  style={{ color: "#555" }}
                 >
-                  {ticker}
-                </button>
-              );
-            })}
+                  ◌
+                </span>
+              )}
+            </div>
+            {searchError && (
+              <p className="mt-1 text-xs font-mono" style={{ color: "#7f1d1d" }}>
+                {searchError}
+              </p>
+            )}
           </div>
+
+          {/* Chip rows — hidden while actively searching */}
+          {showChips && (
+            <div
+              className="flex flex-col gap-1 px-3 py-2 border-b shrink-0"
+              style={{ borderColor: "#1f1f1f" }}
+            >
+              {recentTickers.length > 0 && (
+                <div className="flex items-center gap-1 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+                  <span className="text-xs shrink-0 mr-1 font-mono" style={{ color: "#444" }}>
+                    RECENT
+                  </span>
+                  {recentTickers.map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => handleChipClick(t)}
+                      className="px-2 py-0.5 rounded text-xs font-mono shrink-0"
+                      style={{
+                        background: selectedTicker === t ? "#e5e5e5" : "#1a1a1a",
+                        color: selectedTicker === t ? "#0a0a0a" : "#888",
+                        border: "1px solid",
+                        borderColor: selectedTicker === t ? "#e5e5e5" : "#2a2a2a",
+                      }}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-center gap-1 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+                <span className="text-xs shrink-0 mr-1 font-mono" style={{ color: "#444" }}>
+                  WATCHLIST
+                </span>
+                {WATCHLIST.map((t) => {
+                  const instrBase = t.replace(/=F$/, "").replace(/-USD$/, "");
+                  const hasFlag = flags.some((f) => f.instrument === instrBase);
+                  const flagSeverity = flags.find((f) => f.instrument === instrBase)?.severity;
+                  const chipBg = flagSeverity === "high"
+                    ? "#7f1d1d"
+                    : flagSeverity === "medium"
+                    ? "#78350f"
+                    : hasFlag
+                    ? "#1f2937"
+                    : "transparent";
+                  const isActive = selectedTicker === t;
+                  return (
+                    <button
+                      key={t}
+                      onClick={() => handleChipClick(t)}
+                      className="px-2 py-0.5 rounded text-xs font-mono shrink-0"
+                      style={{
+                        background: isActive ? "#e5e5e5" : chipBg,
+                        color: isActive ? "#0a0a0a" : hasFlag ? "#e5e5e5" : "#666",
+                        border: "1px solid",
+                        borderColor: isActive ? "#e5e5e5" : hasFlag ? "#333" : "#1f1f1f",
+                      }}
+                    >
+                      {instrBase}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Chart */}
           <div className="flex-1 overflow-hidden">
             <ArgusChart
-              instrument={selectedInstrument}
+              instrument={selectedTicker}
               flags={flags}
               timeRange={timeRange}
+              initialBars={selectedBars ?? undefined}
             />
           </div>
         </main>
@@ -267,7 +395,6 @@ export default function Home() {
           className="w-1/4 flex flex-col border-l"
           style={{ borderColor: "#1f1f1f", background: "#0d0d0d" }}
         >
-          {/* Tab headers */}
           <div className="flex border-b shrink-0" style={{ borderColor: "#1f1f1f" }}>
             {(["FLAGS", "ANALYZE"] as const).map((tab) => {
               const tabLabel = tab === "FLAGS" && allFlags.length > 0
@@ -300,64 +427,64 @@ export default function Home() {
                   </span>
                 </div>
               ) : (
-                allFlags.map((flag) => (
-                  <button
-                    key={flag.id}
-                    onClick={() => {
-                      setSelectedInstrument(flag.instrument);
-                      manualSelectionRef.current = true;
-                    }}
-                    style={{
-                      display: "block",
-                      width: "100%",
-                      textAlign: "left",
-                      background: selectedInstrument === flag.instrument ? "#161616" : "transparent",
-                      borderBottom: "1px solid #1a1a1a",
-                      padding: "10px 14px",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
-                      <span
-                        style={{
-                          width: 8,
-                          height: 8,
-                          borderRadius: "50%",
-                          background: SEVERITY_DOT[flag.severity],
-                          flexShrink: 0,
-                          display: "inline-block",
-                        }}
-                      />
-                      <span
-                        style={{
-                          fontFamily: "monospace",
-                          fontWeight: 700,
-                          fontSize: 13,
-                          color: "#e5e5e5",
-                          flexShrink: 0,
-                        }}
-                      >
-                        {flag.instrument}
-                      </span>
-                      <span style={{ fontSize: 11, color: "#555", flexGrow: 1 }}>
-                        {flag.type}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          color: "#333",
-                          flexShrink: 0,
-                          fontFamily: "monospace",
-                        }}
-                      >
-                        {flag.timestamp.toLocaleTimeString("en-US", { hour12: false })}
-                      </span>
-                    </div>
-                    <p style={{ fontSize: 12, color: "#666", margin: 0, lineHeight: 1.5, paddingLeft: 16 }}>
-                      {flag.rationale}
-                    </p>
-                  </button>
-                ))
+                allFlags.map((flag) => {
+                  const fullTicker = SHORT_TO_TICKER[flag.instrument] ?? flag.instrument;
+                  return (
+                    <button
+                      key={flag.id}
+                      onClick={() => handleChipClick(fullTicker)}
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        textAlign: "left",
+                        background: selectedTicker === fullTicker ? "#161616" : "transparent",
+                        borderBottom: "1px solid #1a1a1a",
+                        padding: "10px 14px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+                        <span
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: "50%",
+                            background: SEVERITY_DOT[flag.severity],
+                            flexShrink: 0,
+                            display: "inline-block",
+                          }}
+                        />
+                        <span
+                          style={{
+                            fontFamily: "monospace",
+                            fontWeight: 700,
+                            fontSize: 13,
+                            color: "#e5e5e5",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {flag.instrument}
+                        </span>
+                        <span style={{ fontSize: 11, color: "#555", flexGrow: 1 }}>
+                          {flag.type}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: 11,
+                            color: "#333",
+                            flexShrink: 0,
+                            fontFamily: "monospace",
+                          }}
+                        >
+                          {flag.timestamp.toLocaleTimeString("en-US", { hour12: false })}
+                        </span>
+                      </div>
+                      <p style={{ fontSize: 12, color: "#666", margin: 0, lineHeight: 1.5, paddingLeft: 16 }}>
+                        {flag.rationale}
+                      </p>
+                    </button>
+                  );
+                })
               )}
             </div>
           )}
@@ -365,7 +492,6 @@ export default function Home() {
           {/* ANALYZE tab */}
           {activeTab === "ANALYZE" && (
             <div className="flex-1 flex flex-col p-4 overflow-y-auto gap-3">
-              {/* History */}
               {history.length > 0 && (
                 <div className="flex flex-col gap-2 shrink-0">
                   {history.map((entry, i) => (
@@ -400,7 +526,6 @@ export default function Home() {
                 </div>
               )}
 
-              {/* Input form */}
               <div className="flex flex-col gap-2 shrink-0">
                 <input
                   type="text"
@@ -432,7 +557,6 @@ export default function Home() {
                 </button>
               </div>
 
-              {/* Streaming response */}
               {(isStreaming || response) && (
                 <div
                   className="text-xs font-mono leading-relaxed whitespace-pre-wrap rounded p-3"
@@ -460,7 +584,7 @@ export default function Home() {
       </div>
 
       {/* Kalshi probability strip */}
-      <KalshiStrip selectedInstrument={selectedInstrument} />
+      <KalshiStrip selectedInstrument={shortTicker} />
     </div>
   );
 }
