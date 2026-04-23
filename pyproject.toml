@@ -21,6 +21,7 @@ uvicorn = "^0.29"
 pydantic = "^2.7"
 python-dotenv = "^1.0"
 cryptography = "^42.0"
+yfinance = ">=0.2"
 
 [build-system]
 requires = ["poetry-core"]

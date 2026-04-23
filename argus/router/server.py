@@ -4,14 +4,15 @@ import logging
 from datetime import datetime
 
 import anthropic
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from argus.config import ANTHROPIC_API_KEY
 from argus.connectors import fred as fred_connector
 from argus.connectors import kalshi as kalshi_connector
+from argus.connectors.prices import price_buffer
 import argus.coordinator.main as coordinator_module
 from argus.coordinator.main import broadcast_queue, run as coordinator_run
 from argus.synthesis.claude import SynthesisResult
@@ -50,6 +51,14 @@ class AnalyzeRequest(BaseModel):
 @app.get("/health")
 async def health():
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+
+
+@app.get("/prices/{instrument}")
+async def prices(instrument: str):
+    bars = price_buffer.get(instrument)
+    if bars is None:
+        return JSONResponse({"error": "No data"}, status_code=404)
+    return {"instrument": instrument, "bars": bars}
 
 
 @app.get("/kalshi")

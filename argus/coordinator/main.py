@@ -1,7 +1,8 @@
 import asyncio
 import logging
 
-from argus.connectors.norgate import fetch_snapshot as fetch_norgate
+from argus.connectors.prices import fetch_snapshot as fetch_prices
+from argus.connectors.prices import price_buffer
 from argus.connectors.fred import fetch_snapshot as fetch_fred
 from argus.connectors.kalshi import fetch_snapshot as fetch_kalshi
 from argus.connectors.news import poller as news_poller
@@ -21,20 +22,21 @@ sentiment_scorer = SentimentScorer()
 prev_price_snapshot = None
 prev_kalshi_snapshot = None
 latest_kalshi_snapshot = None
+latest_price_buffer = price_buffer  # reference — updated in-place by fetch_prices
 
 
 async def run_cycle(news_items: list) -> SynthesisResult | None:
     global prev_price_snapshot, prev_kalshi_snapshot, latest_kalshi_snapshot
 
     price, fred, kalshi = await asyncio.gather(
-        fetch_norgate(),
+        fetch_prices(),
         fetch_fred(),
         fetch_kalshi(),
         return_exceptions=True,
     )
 
     if isinstance(price, Exception):
-        logger.warning("fetch_norgate failed: %s", price)
+        logger.warning("fetch_prices failed: %s", price)
         price = None
     if isinstance(fred, Exception):
         logger.warning("fetch_fred failed: %s", fred)

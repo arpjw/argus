@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createChart,
   createSeriesMarkers,
@@ -86,6 +86,8 @@ export default function ArgusChart({ instrument, flags, timeRange }: ArgusChartP
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const barsRef = useRef<CandlestickData<Time>[]>([]);
+  const prevBarCountRef = useRef(0);
+  const [loading, setLoading] = useState(true);
 
   // Initialize chart once
   useEffect(() => {
@@ -150,16 +152,59 @@ export default function ArgusChart({ instrument, flags, timeRange }: ArgusChartP
     };
   }, []);
 
-  // Update data when instrument changes
+  // Fetch real price data, poll every 60s, fall back to synthetic on error
   useEffect(() => {
-    if (!seriesRef.current || !chartRef.current) return;
+    const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-    const bars = generateBars(instrument, 200);
-    barsRef.current = bars;
-    seriesRef.current.setData(bars);
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`${apiBase}/prices/${instrument}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const rawBars = (data.bars ?? []) as Array<{
+          timestamp: string;
+          open: number;
+          high: number;
+          low: number;
+          close: number;
+        }>;
 
-    const range = getVisibleRange(bars, timeRange);
-    chartRef.current.timeScale().setVisibleRange(range);
+        if (rawBars.length === 0) throw new Error("empty");
+
+        const mapped: CandlestickData<Time>[] = rawBars
+          .map((b) => ({
+            time: Math.floor(new Date(b.timestamp).getTime() / 1000) as Time,
+            open: b.open,
+            high: b.high,
+            low: b.low,
+            close: b.close,
+          }))
+          .sort((a, b) => (a.time as number) - (b.time as number));
+
+        const prevCount = prevBarCountRef.current;
+        barsRef.current = mapped;
+        seriesRef.current?.setData(mapped);
+
+        if (mapped.length !== prevCount) {
+          chartRef.current?.timeScale().fitContent();
+        }
+        prevBarCountRef.current = mapped.length;
+      } catch {
+        const bars = generateBars(instrument, 200);
+        barsRef.current = bars;
+        prevBarCountRef.current = bars.length;
+        seriesRef.current?.setData(bars);
+        const range = getVisibleRange(bars, timeRange);
+        chartRef.current?.timeScale().setVisibleRange(range);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+    const id = setInterval(loadData, 60_000);
+    return () => clearInterval(id);
   }, [instrument]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Update time range
@@ -197,5 +242,14 @@ export default function ArgusChart({ instrument, flags, timeRange }: ArgusChartP
     markersRef.current.setMarkers(markers);
   }, [flags, instrument]);
 
-  return <div ref={containerRef} className="w-full h-full" />;
+  return (
+    <div className="relative w-full h-full">
+      <div ref={containerRef} className="w-full h-full" />
+      {loading && (
+        <div className="absolute inset-0 flex items-center justify-center text-zinc-500 text-sm pointer-events-none">
+          Loading...
+        </div>
+      )}
+    </div>
+  );
 }
