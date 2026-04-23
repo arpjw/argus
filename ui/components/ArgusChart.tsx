@@ -16,6 +16,8 @@ import { Flag } from "../hooks/useArgusStream";
 
 type TimeRange = "1H" | "4H" | "1D";
 
+interface BarData { timestamp: string; open: number; high: number; low: number; close: number; volume: number; }
+
 const BASE_PRICES: Record<string, number> = {
   ES: 5200, NQ: 18000, RTY: 2100, YM: 39000,
   CL: 75, NG: 2.5, GC: 2300, SI: 27,
@@ -78,7 +80,7 @@ interface ArgusChartProps {
   instrument: string;
   flags: Flag[];
   timeRange: TimeRange;
-  initialBars?: any[];
+  initialBars?: BarData[];
 }
 
 export default function ArgusChart({ instrument, flags, timeRange, initialBars }: ArgusChartProps) {

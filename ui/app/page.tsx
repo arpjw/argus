@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import dynamic from "next/dynamic";
-import { useArgusStream, type Flag, type FlagEntry } from "../hooks/useArgusStream";
+import { useArgusStream, type FlagEntry } from "../hooks/useArgusStream";
 import { useAnalysis } from "../hooks/useAnalysis";
 import KalshiStrip from "../components/KalshiStrip";
 
@@ -27,6 +27,8 @@ const SHORT_TO_TICKER: Record<string, string> = {
 };
 
 type TimeRange = "1H" | "4H" | "1D";
+
+interface BarData { timestamp: string; open: number; high: number; low: number; close: number; volume: number; }
 
 const SEVERITY_DOT: Record<FlagEntry["severity"], string> = {
   high: "#ef4444",
@@ -80,7 +82,7 @@ export default function Home() {
   const [recentTickers, setRecentTickers] = useState<string[]>([]);
   const [selectedTicker, setSelectedTicker] = useState("ES=F");
   const [selectedName, setSelectedName] = useState("E-mini S&P 500");
-  const [selectedBars, setSelectedBars] = useState<any[] | null>(null);
+  const [selectedBars, setSelectedBars] = useState<BarData[] | null>(null);
   const debounceRef = useRef<NodeJS.Timeout>();
 
   // Load recent tickers from localStorage on mount
