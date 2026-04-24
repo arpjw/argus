@@ -6,11 +6,14 @@
 Argus is an autonomous market intelligence system that monitors futures markets across equities, commodities, fixed income, currencies, and crypto. It ingests live data, detects anomalies, correlates signals across instruments, and delivers synthesized alerts via Telegram.
 
 ## Architecture
+
+```
 Data Layer      →  Connectors (yfinance, FRED, Kalshi, CFTC, macro calendar)
 Coordinator     →  Orchestrates polling loops, data routing, regime change events
 Engines         →  Signal detection (z-score, correlation, regime classification)
 Synthesis       →  Claude-powered narrative generation
 Output          →  Telegram alerts + FastAPI status endpoint
+```
 
 Five-tier pipeline:
 
@@ -46,18 +49,24 @@ Confidence is expressed as vote share. A minimum of 3 indicator votes is require
 ### Synthesis Context Structure
 
 Each Claude synthesis cycle receives a structured context in the following order:
+
+```
 --- MACRO REGIME ---
 CURRENT: Risk-Off (71% confidence)
 SIGNALS: VIX > 25, T10Y2Y inverting, ES 5d return -2.1%
+
 --- UPCOMING EVENTS ---
 CPI (2 days) [IMMINENT]: ZB, ZN, 6E, 6J, GC
 NFP (9 days): ES, NQ, RTY
+
 --- COT POSITIONING ---
 ES: Commercial NET +12400 (Wk chg: +3200) | Spec NET -89000 (z: -2.3σ) [EXTREME]
 GC: Commercial NET +8100 (Wk chg: -400) | Spec NET +44000 (z: +0.7σ)
+
 --- PRICE DATA ---
 --- FRED MACRO ---
 --- KALSHI MARKETS ---
+```
 
 `[IMMINENT]` tags events within 3 days. `[EXTREME]` tags COT readings where |z| > 2. `[REGIME CHANGE]` is prepended to the macro regime section when a transition is detected.
 
@@ -70,15 +79,20 @@ docker-compose up
 ```
 
 ## Environment Variables
+
+```
 FRED_API_KEY=
 KALSHI_API_KEY=
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 ANTHROPIC_API_KEY=
+```
 
 ## Project Structure
+
+```
 argus/
-├── main.py          # Entry point
+├── __main__.py          # Entry point
 ├── config.py            # Typed env config
 ├── coordinator/         # Async orchestration loop + regime change listener
 ├── engines/
@@ -95,3 +109,4 @@ ui/                      # Frontend (future)
 Dockerfile
 docker-compose.yml
 pyproject.toml
+```
