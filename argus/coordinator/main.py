@@ -5,6 +5,8 @@ from argus.connectors.prices import fetch_snapshot as fetch_prices
 from argus.connectors.prices import price_buffer
 from argus.connectors.fred import fetch_snapshot as fetch_fred
 from argus.connectors.kalshi import fetch_snapshot as fetch_kalshi
+from argus.connectors.calendar import fetch_snapshot as fetch_calendar
+from argus.connectors.cot import fetch_snapshot as fetch_cot
 from argus.connectors.news import poller as news_poller
 from argus.engines.anomaly import AnomalyEngine
 from argus.engines.sentiment import SentimentScorer
@@ -28,10 +30,12 @@ latest_price_buffer = price_buffer  # reference — updated in-place by fetch_pr
 async def run_cycle(news_items: list) -> SynthesisResult | None:
     global prev_price_snapshot, prev_kalshi_snapshot, latest_kalshi_snapshot
 
-    price, fred, kalshi = await asyncio.gather(
+    price, fred, kalshi, calendar, cot = await asyncio.gather(
         fetch_prices(),
         fetch_fred(),
         fetch_kalshi(),
+        fetch_calendar(),
+        fetch_cot(),
         return_exceptions=True,
     )
 
@@ -44,6 +48,12 @@ async def run_cycle(news_items: list) -> SynthesisResult | None:
     if isinstance(kalshi, Exception):
         logger.warning("fetch_kalshi failed: %s", kalshi)
         kalshi = None
+    if isinstance(calendar, Exception):
+        logger.warning("fetch_calendar failed: %s", calendar)
+        calendar = None
+    if isinstance(cot, Exception):
+        logger.warning("fetch_cot failed: %s", cot)
+        cot = None
 
     if price is None or fred is None or kalshi is None:
         return None
@@ -63,6 +73,8 @@ async def run_cycle(news_items: list) -> SynthesisResult | None:
         fred_snapshot=fred,
         news_items=news_items,
         prev_price_snapshot=prev_price_snapshot,
+        calendar_snapshot=calendar,
+        cot_snapshot=cot,
     )
 
     result = await synthesize(context)
