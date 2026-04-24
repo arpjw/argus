@@ -10,6 +10,7 @@ from argus.connectors.cot import fetch_snapshot as fetch_cot
 from argus.connectors.news import poller as news_poller
 from argus.engines.anomaly import AnomalyEngine
 from argus.engines.sentiment import SentimentScorer
+from argus.engines.regime import RegimeClassifier, regime_change_event
 from argus.synthesis.packager import pack_context
 from argus.synthesis.claude import synthesize, SynthesisResult
 from argus import config
@@ -20,6 +21,7 @@ broadcast_queue: asyncio.Queue[SynthesisResult] = asyncio.Queue(maxsize=100)
 
 anomaly_engine = AnomalyEngine()
 sentiment_scorer = SentimentScorer()
+regime_classifier = RegimeClassifier()
 
 prev_price_snapshot = None
 prev_kalshi_snapshot = None
@@ -65,6 +67,8 @@ async def run_cycle(news_items: list) -> SynthesisResult | None:
         ),
     )
 
+    regime_result = regime_classifier.classify(fred, price)
+
     context = pack_context(
         anomaly_flags=anomaly_flags,
         sentiment_scores=sentiment_scores,
@@ -75,6 +79,7 @@ async def run_cycle(news_items: list) -> SynthesisResult | None:
         prev_price_snapshot=prev_price_snapshot,
         calendar_snapshot=calendar,
         cot_snapshot=cot,
+        regime_result=regime_result,
     )
 
     result = await synthesize(context)
@@ -104,6 +109,16 @@ async def heartbeat_loop() -> None:
             await run_cycle([])
         except Exception as exc:
             logger.exception("heartbeat_loop error: %s", exc)
+
+
+async def regime_change_loop() -> None:
+    while True:
+        await regime_change_event.wait()
+        logger.info("Regime change detected — triggering immediate synthesis cycle")
+        try:
+            await run_cycle([])
+        except Exception as exc:
+            logger.exception("regime_change_loop run_cycle error: %s", exc)
 
 
 async def event_loop() -> None:
@@ -153,4 +168,5 @@ async def run() -> None:
     await asyncio.gather(
         heartbeat_loop(),
         event_loop(),
+        regime_change_loop(),
     )

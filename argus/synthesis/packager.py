@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from argus.connectors.types import DataSnapshot, OHLCVBar, MacroRelease, KalshiMarket, NewsItem
 from argus.engines.types import AnomalyFlag, SentimentScore
+from argus.engines.regime import RegimeResult
 
 _SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
@@ -16,8 +17,21 @@ def pack_context(
     prev_price_snapshot: DataSnapshot | None = None,
     calendar_snapshot: DataSnapshot | None = None,
     cot_snapshot: DataSnapshot | None = None,
+    regime_result: RegimeResult | None = None,
 ) -> str:
     sections: list[str] = []
+
+    # --- MACRO REGIME ---
+    if regime_result is not None:
+        regime_lines = ["--- MACRO REGIME ---"]
+        if regime_result.regime_change and regime_result.prev_regime is not None:
+            regime_lines.append(
+                f"[REGIME CHANGE] {regime_result.prev_regime} → {regime_result.regime}"
+            )
+        conf_pct = int(regime_result.confidence * 100)
+        regime_lines.append(f"CURRENT: {regime_result.regime} ({conf_pct}% confidence)")
+        regime_lines.append(f"SIGNALS: {', '.join(regime_result.signals)}")
+        sections.append("\n".join(regime_lines))
 
     # --- MARKET SNAPSHOT ---
     bars: list[OHLCVBar] = price_snapshot.payload.get("bars", [])
