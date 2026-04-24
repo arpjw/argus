@@ -39,7 +39,10 @@ type StreamState = {
   status: "connecting" | "live" | "error";
 };
 
-const STREAM_URL = "http://localhost:8000/stream";
+const _API_KEY = process.env.NEXT_PUBLIC_ARGUS_API_KEY ?? "";
+const STREAM_URL = _API_KEY
+  ? `http://localhost:8000/stream?api_key=${_API_KEY}`
+  : "http://localhost:8000/stream";
 const MAX_BACKOFF = 30_000;
 
 export function useArgusStream(): StreamState {

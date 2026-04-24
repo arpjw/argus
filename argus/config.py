@@ -12,12 +12,15 @@ KALSHI_PRIVATE_KEY: str = os.getenv("KALSHI_PRIVATE_KEY", "")
 FRED_API_KEY: str = os.getenv("FRED_API_KEY", "")
 UNUSUAL_WHALES_API_KEY: str = os.getenv("UNUSUAL_WHALES_API_KEY", "")
 NORGATE_DATA_PATH: str = os.getenv("NORGATE_DATA_PATH", "")
+ARGUS_API_KEY: str = os.getenv("ARGUS_API_KEY", "")
 
 SIGMA_THRESHOLD: float = float(os.getenv("SIGMA_THRESHOLD", "2.0"))
 CORR_THRESHOLD: float = float(os.getenv("CORR_THRESHOLD", "0.3"))
 KALSHI_GAP_THRESHOLD: float = float(os.getenv("KALSHI_GAP_THRESHOLD", "0.05"))
 HEARTBEAT_INTERVAL: int = int(os.getenv("HEARTBEAT_INTERVAL", "900"))
 NEWS_POLL_INTERVAL: int = int(os.getenv("NEWS_POLL_INTERVAL", "60"))
+
+DB_PATH: str = os.getenv("DB_PATH", "./data/argus.db")
 
 INSTRUMENTS: list[str] = [
     "ES", "NQ", "RTY", "YM",

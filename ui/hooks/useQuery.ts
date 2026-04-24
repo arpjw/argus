@@ -39,8 +39,10 @@ export function useQuery(): UseQueryReturn {
       let accumulated = "";
 
       try {
+        const _apiKey = process.env.NEXT_PUBLIC_ARGUS_API_KEY ?? "";
+        const _apiKeyParam = _apiKey ? `&api_key=${_apiKey}` : "";
         const res = await fetch(
-          `${API_BASE}/query?question=${encodeURIComponent(question)}`
+          `${API_BASE}/query?question=${encodeURIComponent(question)}${_apiKeyParam}`
         );
 
         if (res.status === 429) {

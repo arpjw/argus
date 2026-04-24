@@ -7,12 +7,14 @@ from datetime import datetime
 import anthropic
 import pandas as pd
 import yfinance as yf
-from fastapi import FastAPI, Response
+from fastapi import Depends, FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from argus.config import ANTHROPIC_API_KEY
+from argus.router.auth import verify_api_key
+from argus.store import db
 from argus.connectors import fred as fred_connector
 from argus.connectors import kalshi as kalshi_connector
 from argus.connectors.prices import price_buffer
@@ -54,6 +56,14 @@ ANALYZE_SYSTEM_PROMPT = (
 class AnalyzeRequest(BaseModel):
     text: str
     label: str = "Document"
+
+
+@app.get("/history")
+async def get_history(limit: int = 20, _: None = Depends(verify_api_key)):
+    try:
+        return await db.get_recent_runs(limit=limit)
+    except Exception:
+        return []
 
 
 @app.get("/health")
@@ -148,7 +158,7 @@ async def kalshi():
 
 
 @app.get("/stream")
-async def stream():
+async def stream(_: None = Depends(verify_api_key)):
     async def event_generator():
         global latest_synthesis
         try:

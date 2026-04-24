@@ -103,7 +103,10 @@ export default function Home() {
     }
     setSearchLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/prices/search?ticker=${encodeURIComponent(ticker)}`);
+      const _apiKey = process.env.NEXT_PUBLIC_ARGUS_API_KEY ?? "";
+      const res = await fetch(`${API_BASE}/prices/search?ticker=${encodeURIComponent(ticker)}`, {
+        headers: _apiKey ? { "X-Api-Key": _apiKey } : {},
+      });
       const data = await res.json();
       if (data.valid && data.bars?.length) {
         setSelectedTicker(data.ticker);

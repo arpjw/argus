@@ -2,12 +2,13 @@ import json
 import logging
 import time
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response, StreamingResponse
 
 import anthropic
 import argus.coordinator.main as coordinator_module
 from argus.config import ANTHROPIC_API_KEY
+from argus.router.auth import verify_api_key
 
 logger = logging.getLogger("argus.router.query")
 
@@ -25,7 +26,7 @@ RATE_LIMIT_SECONDS = 10
 
 
 @router.get("/query")
-async def query_endpoint(question: str = Query(...)):
+async def query_endpoint(question: str = Query(...), _: None = Depends(verify_api_key)):
     global _last_query_time
     now = time.time()
 

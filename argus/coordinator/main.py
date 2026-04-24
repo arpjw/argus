@@ -16,6 +16,7 @@ from argus.engines.event_detector import EventDetector, EventSignal
 from argus.synthesis.packager import pack_context
 from argus.synthesis.claude import synthesize, SynthesisResult
 from argus import config
+from argus.store import db
 
 logger = logging.getLogger("argus.coordinator")
 
@@ -109,6 +110,19 @@ async def run_cycle(
     except asyncio.QueueFull:
         logger.warning("broadcast_queue full — dropping synthesis result")
 
+    try:
+        run_id = await db.save_run(
+            timestamp=result.timestamp.isoformat(),
+            regime=regime_result.regime if regime_result else None,
+            confidence=regime_result.confidence if regime_result else None,
+            narrative=result.narrative,
+            flag_count=len(anomaly_flags),
+            trigger_type=triggered_events[0].trigger_type if triggered_events else None,
+        )
+        await db.save_flags(run_id, anomaly_flags)
+    except Exception as e:
+        logger.warning("Persistence write failed (non-fatal): %s", e)
+
     prev_price_snapshot = price
     prev_kalshi_snapshot = kalshi
     latest_kalshi_snapshot = kalshi
@@ -200,6 +214,13 @@ async def run() -> None:
     logger.info("Heartbeat interval: %ss", config.HEARTBEAT_INTERVAL)
     if not config.TELEGRAM_ENABLED:
         logger.info("Telegram disabled, output routed to web only")
+
+    await db.init_db()
+    last_run = await db.get_recent_runs(limit=1)
+    if last_run:
+        logger.info("Argus resuming — last synthesis at %s", last_run[0]["timestamp"])
+    else:
+        logger.info("Argus starting fresh — no prior synthesis history found")
 
     await run_cycle([])
 
