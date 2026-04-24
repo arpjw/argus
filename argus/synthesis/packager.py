@@ -14,6 +14,8 @@ def pack_context(
     fred_snapshot: DataSnapshot,
     news_items: list[NewsItem],
     prev_price_snapshot: DataSnapshot | None = None,
+    calendar_snapshot: DataSnapshot | None = None,
+    cot_snapshot: DataSnapshot | None = None,
 ) -> str:
     sections: list[str] = []
 
@@ -117,6 +119,37 @@ def pack_context(
         headline_lines.append("No headlines this cycle.")
     headline_section = "\n".join(headline_lines)
     sections.append(headline_section)
+
+    # --- UPCOMING EVENTS ---
+    if calendar_snapshot is not None:
+        events: list[dict] = calendar_snapshot.payload.get("events", [])
+        if events:
+            event_lines = ["--- UPCOMING EVENTS ---"]
+            for e in events:
+                instruments = e.get("related_instruments", [])
+                tag = " [IMMINENT]" if e.get("days_until", 99) <= 3 else ""
+                inst_str = (": " + ", ".join(instruments)) if instruments else ""
+                event_lines.append(
+                    f"{e['name']} ({e['days_until']} days){tag}{inst_str}"
+                )
+            sections.append("\n".join(event_lines))
+
+    # --- COT POSITIONING ---
+    if cot_snapshot is not None:
+        positions: list[dict] = cot_snapshot.payload.get("positions", [])
+        if positions:
+            cot_lines = ["--- COT POSITIONING ---"]
+            for p in positions:
+                comm_net = p["commercial_net"]
+                wk_chg = p["commercial_net_change"]
+                spec_net = p["noncommercial_net"]
+                z = p["noncommercial_z_score"]
+                extreme_tag = " [EXTREME]" if abs(z) > 2 else ""
+                cot_lines.append(
+                    f"{p['instrument']}: Commercial NET {comm_net:+,} (Wk chg: {wk_chg:+,})"
+                    f" | Spec NET {spec_net:+,} (z: {z:+.1f}σ){extreme_tag}"
+                )
+            sections.append("\n".join(cot_lines))
 
     output = "\n\n".join(sections)
 
