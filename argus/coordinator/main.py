@@ -11,6 +11,7 @@ from argus.connectors.news import poller as news_poller
 from argus.engines.anomaly import AnomalyEngine
 from argus.engines.sentiment import SentimentScorer
 from argus.engines.regime import RegimeClassifier, regime_change_event
+from argus.engines.event_detector import EventDetector, EventSignal
 from argus.synthesis.packager import pack_context
 from argus.synthesis.claude import synthesize, SynthesisResult
 from argus import config
@@ -22,15 +23,20 @@ broadcast_queue: asyncio.Queue[SynthesisResult] = asyncio.Queue(maxsize=100)
 anomaly_engine = AnomalyEngine()
 sentiment_scorer = SentimentScorer()
 regime_classifier = RegimeClassifier()
+event_detector = EventDetector()
 
 prev_price_snapshot = None
 prev_kalshi_snapshot = None
 latest_kalshi_snapshot = None
 latest_price_buffer = price_buffer  # reference — updated in-place by fetch_prices
+latest_context: str = ""
 
 
-async def run_cycle(news_items: list) -> SynthesisResult | None:
-    global prev_price_snapshot, prev_kalshi_snapshot, latest_kalshi_snapshot
+async def run_cycle(
+    news_items: list,
+    triggered_events: list[EventSignal] | None = None,
+) -> SynthesisResult | None:
+    global prev_price_snapshot, prev_kalshi_snapshot, latest_kalshi_snapshot, latest_context
 
     price, fred, kalshi, calendar, cot = await asyncio.gather(
         fetch_prices(),
@@ -80,7 +86,9 @@ async def run_cycle(news_items: list) -> SynthesisResult | None:
         calendar_snapshot=calendar,
         cot_snapshot=cot,
         regime_result=regime_result,
+        triggered_events=triggered_events,
     )
+    latest_context = context
 
     result = await synthesize(context)
 
@@ -109,6 +117,22 @@ async def heartbeat_loop() -> None:
             await run_cycle([])
         except Exception as exc:
             logger.exception("heartbeat_loop error: %s", exc)
+
+
+async def price_check_loop() -> None:
+    while True:
+        await asyncio.sleep(60)
+        try:
+            price = await fetch_prices()
+            signals = event_detector.check(price)
+            if signals:
+                logger.info(
+                    "Event detector fired %d signal(s) — triggering immediate synthesis",
+                    len(signals),
+                )
+                await run_cycle([], triggered_events=signals)
+        except Exception as exc:
+            logger.exception("price_check_loop error: %s", exc)
 
 
 async def regime_change_loop() -> None:
@@ -162,6 +186,8 @@ async def run() -> None:
     logger.info("Argus initializing...")
     logger.info("Instruments: %s", config.INSTRUMENTS)
     logger.info("Heartbeat interval: %ss", config.HEARTBEAT_INTERVAL)
+    if not config.TELEGRAM_ENABLED:
+        logger.info("Telegram disabled, output routed to web only")
 
     await run_cycle([])
 
@@ -169,4 +195,5 @@ async def run() -> None:
         heartbeat_loop(),
         event_loop(),
         regime_change_loop(),
+        price_check_loop(),
     )

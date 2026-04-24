@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { useArgusStream, type FlagEntry } from "../hooks/useArgusStream";
 import { useAnalysis } from "../hooks/useAnalysis";
+import { useQuery } from "../hooks/useQuery";
 import KalshiStrip from "../components/KalshiStrip";
 
 const ArgusChart = dynamic(() => import("../components/ArgusChart"), { ssr: false });
@@ -54,7 +55,7 @@ type AnalysisEntry = {
 };
 
 export default function Home() {
-  const { flags, allFlags, entries, lastUpdated, status } = useArgusStream();
+  const { flags, allFlags, entries, lastUpdated, status, streamingNarrative, isStreaming: isSynthesizing } = useArgusStream();
   const feedRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -66,6 +67,8 @@ export default function Home() {
   }, [entries.length]);
 
   const { analyze, response, isStreaming, error } = useAnalysis();
+  const { submit: submitQuery, history: queryHistory, streamingAnswer, pendingQuestion, isStreaming: isQueryStreaming, rateLimited } = useQuery();
+  const [queryInput, setQueryInput] = useState("");
 
   const [activeTab, setActiveTab] = useState<"FLAGS" | "ANALYZE">("FLAGS");
   const [label, setLabel] = useState("");
@@ -199,7 +202,26 @@ export default function Home() {
           </div>
 
           <div ref={feedRef} className="flex-1 overflow-y-auto">
-            {entries.length === 0 ? (
+            {/* Live streaming narrative — shown at top while tokens arrive */}
+            {(isSynthesizing || streamingNarrative) && (
+              <div
+                className="px-4 py-3"
+                style={{ borderBottom: "1px solid #1a1a1a" }}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-mono" style={{ color: "#555", fontSize: "11px" }}>
+                    streaming...
+                  </span>
+                </div>
+                <p className="font-mono leading-relaxed" style={{ color: "#ccc", fontSize: "13px" }}>
+                  {streamingNarrative}
+                  {isSynthesizing && <span className="cursor-blink">|</span>}
+                </p>
+              </div>
+            )}
+
+            {/* Historical entries — or empty state */}
+            {entries.length === 0 && !isSynthesizing && !streamingNarrative ? (
               <div className="flex items-center justify-center gap-2 h-full" style={{ color: "#555" }}>
                 <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse shrink-0" />
                 <span className="text-xs font-mono">Watching markets...</span>
@@ -493,93 +515,184 @@ export default function Home() {
 
           {/* ANALYZE tab */}
           {activeTab === "ANALYZE" && (
-            <div className="flex-1 flex flex-col p-4 overflow-y-auto gap-3">
-              {history.length > 0 && (
-                <div className="flex flex-col gap-2 shrink-0">
-                  {history.map((entry, i) => (
-                    <div key={i} className="border rounded" style={{ borderColor: "#1f1f1f" }}>
-                      <button
-                        onClick={() => setExpandedIdx(expandedIdx === i ? null : i)}
-                        className="w-full flex items-center justify-between px-3 py-2 text-left"
-                        style={{ background: "transparent" }}
-                      >
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-xs font-semibold" style={{ color: "#e5e5e5" }}>
-                            {entry.label}
-                          </span>
-                          <span className="text-xs" style={{ color: "#555" }}>
-                            {formatTs(entry.timestamp)}
-                          </span>
-                        </div>
-                        <span className="text-xs ml-2 shrink-0" style={{ color: "#555" }}>
-                          {expandedIdx === i ? "▲" : "▼"}
-                        </span>
-                      </button>
-                      {expandedIdx === i && (
-                        <div
-                          className="px-3 pb-3 text-xs font-mono leading-relaxed whitespace-pre-wrap"
-                          style={{ color: "#ccc", background: "#111" }}
-                        >
-                          {entry.text}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div className="flex flex-col gap-2 shrink-0">
-                <input
-                  type="text"
-                  value={label}
-                  onChange={(e) => setLabel(e.target.value)}
-                  placeholder="Fed speech, article, earnings..."
-                  className="w-full px-3 py-2 text-xs rounded border bg-transparent"
-                  style={{ borderColor: "#2a2a2a", color: "#e5e5e5", outline: "none" }}
-                />
-                <textarea
-                  value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                  placeholder="Paste any text — article, transcript, research note — and Argus will contextualize it against live market conditions."
-                  rows={6}
-                  className="w-full px-3 py-2 text-xs rounded border bg-transparent resize-none"
-                  style={{ borderColor: "#2a2a2a", color: "#e5e5e5", outline: "none" }}
-                />
-                <button
-                  onClick={handleAnalyze}
-                  disabled={isStreaming || !inputText.trim()}
-                  className="w-full py-2 text-xs font-semibold rounded"
-                  style={{
-                    background: isStreaming || !inputText.trim() ? "#1a1a1a" : "#2a2a2a",
-                    color: isStreaming || !inputText.trim() ? "#444" : "#e5e5e5",
-                    cursor: isStreaming || !inputText.trim() ? "not-allowed" : "pointer",
+            <div className="flex-1 flex flex-col overflow-hidden">
+              {/* Query input — sticky at top */}
+              <div className="shrink-0 px-3 pt-3 pb-2 border-b" style={{ borderColor: "#1f1f1f" }}>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (queryInput.trim()) {
+                      submitQuery(queryInput.trim());
+                      setQueryInput("");
+                    }
                   }}
+                  className="flex gap-2"
                 >
-                  {isStreaming ? "Analyzing..." : "Analyze"}
-                </button>
+                  <input
+                    type="text"
+                    value={queryInput}
+                    onChange={(e) => setQueryInput(e.target.value)}
+                    disabled={isQueryStreaming}
+                    placeholder="Ask Argus anything..."
+                    className="flex-1 min-w-0 px-2 py-1.5 text-xs rounded border bg-transparent"
+                    style={{
+                      borderColor: "#2a2a2a",
+                      color: "#e5e5e5",
+                      outline: "none",
+                      opacity: isQueryStreaming ? 0.5 : 1,
+                    }}
+                  />
+                  <button
+                    type="submit"
+                    disabled={isQueryStreaming || !queryInput.trim()}
+                    className="px-3 py-1.5 text-xs font-semibold rounded shrink-0"
+                    style={{
+                      background: isQueryStreaming || !queryInput.trim() ? "#1a1a1a" : "#2a2a2a",
+                      color: isQueryStreaming || !queryInput.trim() ? "#444" : "#e5e5e5",
+                      cursor: isQueryStreaming || !queryInput.trim() ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    Ask
+                  </button>
+                </form>
+                {rateLimited && (
+                  <p className="mt-1.5 text-xs font-mono" style={{ color: "#b45309" }}>
+                    Please wait a moment before asking again.
+                  </p>
+                )}
               </div>
 
-              {(isStreaming || response) && (
-                <div
-                  className="text-xs font-mono leading-relaxed whitespace-pre-wrap rounded p-3"
-                  style={{ background: "#111", color: "#ccc" }}
-                >
-                  {isStreaming && !response
-                    ? "Argus is reading..."
-                    : response}
-                  {isStreaming && response && (
-                    <span className="animate-pulse" style={{ color: "#555" }}>
-                      ▌
-                    </span>
-                  )}
-                </div>
-              )}
+              {/* Scrollable body */}
+              <div className="flex-1 overflow-y-auto flex flex-col p-3 gap-3">
+                {/* Active streaming Q&A */}
+                {isQueryStreaming && (
+                  <div>
+                    <p className="text-xs font-mono mb-1" style={{ color: "#555" }}>
+                      Q: {pendingQuestion}
+                    </p>
+                    <div
+                      className="text-xs font-mono leading-relaxed whitespace-pre-wrap"
+                      style={{ color: "#ccc" }}
+                    >
+                      {streamingAnswer || "..."}
+                      <span className="cursor-blink">|</span>
+                    </div>
+                  </div>
+                )}
 
-              {error && (
-                <p className="text-xs shrink-0" style={{ color: "#e57373" }}>
-                  Error: {error}
-                </p>
-              )}
+                {/* Q&A history — newest at top */}
+                {queryHistory.map((qa) => (
+                  <div key={qa.id} className="pb-2" style={{ borderBottom: "1px solid #1a1a1a" }}>
+                    <p className="text-xs font-mono mb-1" style={{ color: "#555" }}>
+                      Q: {qa.question}
+                    </p>
+                    <p
+                      className="text-xs font-mono leading-relaxed whitespace-pre-wrap"
+                      style={{ color: "#ccc" }}
+                    >
+                      {qa.answer}
+                    </p>
+                    <p className="text-xs mt-1 font-mono" style={{ color: "#333" }}>
+                      {formatTs(qa.timestamp)}
+                    </p>
+                  </div>
+                ))}
+
+                {/* Divider before document analysis */}
+                <div className="shrink-0 pt-1">
+                  <div className="border-t mb-2" style={{ borderColor: "#2a2a2a" }} />
+                  <span className="text-xs font-mono uppercase tracking-widest" style={{ color: "#333" }}>
+                    Analyze Document
+                  </span>
+                </div>
+
+                {/* Document analysis history accordion */}
+                {history.length > 0 && (
+                  <div className="flex flex-col gap-2 shrink-0">
+                    {history.map((entry, i) => (
+                      <div key={i} className="border rounded" style={{ borderColor: "#1f1f1f" }}>
+                        <button
+                          onClick={() => setExpandedIdx(expandedIdx === i ? null : i)}
+                          className="w-full flex items-center justify-between px-3 py-2 text-left"
+                          style={{ background: "transparent" }}
+                        >
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-xs font-semibold" style={{ color: "#e5e5e5" }}>
+                              {entry.label}
+                            </span>
+                            <span className="text-xs" style={{ color: "#555" }}>
+                              {formatTs(entry.timestamp)}
+                            </span>
+                          </div>
+                          <span className="text-xs ml-2 shrink-0" style={{ color: "#555" }}>
+                            {expandedIdx === i ? "▲" : "▼"}
+                          </span>
+                        </button>
+                        {expandedIdx === i && (
+                          <div
+                            className="px-3 pb-3 text-xs font-mono leading-relaxed whitespace-pre-wrap"
+                            style={{ color: "#ccc", background: "#111" }}
+                          >
+                            {entry.text}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Document analysis form */}
+                <div className="flex flex-col gap-2 shrink-0">
+                  <input
+                    type="text"
+                    value={label}
+                    onChange={(e) => setLabel(e.target.value)}
+                    placeholder="Fed speech, article, earnings..."
+                    className="w-full px-3 py-2 text-xs rounded border bg-transparent"
+                    style={{ borderColor: "#2a2a2a", color: "#e5e5e5", outline: "none" }}
+                  />
+                  <textarea
+                    value={inputText}
+                    onChange={(e) => setInputText(e.target.value)}
+                    placeholder="Paste any text — article, transcript, research note — and Argus will contextualize it against live market conditions."
+                    rows={6}
+                    className="w-full px-3 py-2 text-xs rounded border bg-transparent resize-none"
+                    style={{ borderColor: "#2a2a2a", color: "#e5e5e5", outline: "none" }}
+                  />
+                  <button
+                    onClick={handleAnalyze}
+                    disabled={isStreaming || !inputText.trim()}
+                    className="w-full py-2 text-xs font-semibold rounded"
+                    style={{
+                      background: isStreaming || !inputText.trim() ? "#1a1a1a" : "#2a2a2a",
+                      color: isStreaming || !inputText.trim() ? "#444" : "#e5e5e5",
+                      cursor: isStreaming || !inputText.trim() ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    {isStreaming ? "Analyzing..." : "Analyze"}
+                  </button>
+                </div>
+
+                {(isStreaming || response) && (
+                  <div
+                    className="text-xs font-mono leading-relaxed whitespace-pre-wrap rounded p-3"
+                    style={{ background: "#111", color: "#ccc" }}
+                  >
+                    {isStreaming && !response ? "Argus is reading..." : response}
+                    {isStreaming && response && (
+                      <span className="animate-pulse" style={{ color: "#555" }}>
+                        ▌
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {error && (
+                  <p className="text-xs shrink-0" style={{ color: "#e57373" }}>
+                    Error: {error}
+                  </p>
+                )}
+              </div>
             </div>
           )}
         </aside>

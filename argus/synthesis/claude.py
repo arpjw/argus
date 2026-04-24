@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -10,6 +11,9 @@ from argus.config import ANTHROPIC_API_KEY
 from argus.engines.types import AnomalyFlag, SentimentScore  # noqa: F401
 
 logger = logging.getLogger(__name__)
+
+# Module-level queue: str chunks during streaming, SynthesisResult on success, None on error.
+synthesis_queue: asyncio.Queue = asyncio.Queue()
 
 SYSTEM_PROMPT = """You are Argus, a systematic macro market analyst. You watch futures markets, macro data, prediction markets, and news simultaneously. You are precise, direct, and quantitative. You do not speculate — you synthesize what the data shows.
 
@@ -56,6 +60,7 @@ async def synthesize(context: str) -> SynthesisResult:
         full_response = ""
         async for chunk in synthesize_stream(context):
             full_response += chunk
+            await synthesis_queue.put(chunk)
 
         parts = full_response.split("\n---\n", 1)
         if len(parts) == 2:
@@ -69,14 +74,17 @@ async def synthesize(context: str) -> SynthesisResult:
         except json.JSONDecodeError:
             parsed_flags = []
 
-        return SynthesisResult(
+        result = SynthesisResult(
             flags=parsed_flags,
             narrative=narrative.strip(),
             raw=full_response,
             timestamp=datetime.utcnow(),
         )
+        await synthesis_queue.put(result)
+        return result
     except Exception as e:
         logger.error("synthesize error: %s", e)
+        await synthesis_queue.put(None)
         return SynthesisResult(
             flags=[],
             narrative="Synthesis unavailable.",
@@ -85,4 +93,4 @@ async def synthesize(context: str) -> SynthesisResult:
         )
 
 
-__all__ = ["SynthesisResult", "synthesize", "synthesize_stream", "SYSTEM_PROMPT"]
+__all__ = ["SynthesisResult", "synthesize", "synthesize_stream", "synthesis_queue", "SYSTEM_PROMPT"]

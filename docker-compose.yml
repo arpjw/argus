@@ -4,5 +4,7 @@ services:
   argus:
     build: .
     env_file: .env
+    # Required: ANTHROPIC_API_KEY
+    # Optional: TELEGRAM_ENABLED, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (Telegram disabled by default)
     restart: unless-stopped
     command: python -m argus

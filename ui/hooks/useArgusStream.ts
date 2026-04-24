@@ -32,6 +32,8 @@ type StreamState = {
   flags: Flag[];
   allFlags: FlagEntry[];
   narrative: string;
+  streamingNarrative: string;
+  isStreaming: boolean;
   entries: FeedEntry[];
   lastUpdated: Date | null;
   status: "connecting" | "live" | "error";
@@ -45,6 +47,8 @@ export function useArgusStream(): StreamState {
     flags: [],
     allFlags: [],
     narrative: "",
+    streamingNarrative: "",
+    isStreaming: false,
     entries: [],
     lastUpdated: null,
     status: "connecting",
@@ -64,8 +68,26 @@ export function useArgusStream(): StreamState {
       es.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data.type === "synthesis") {
+          if (data.type === "token") {
             backoffRef.current = 5_000;
+            setState((s) => ({
+              ...s,
+              isStreaming: true,
+              streamingNarrative: s.streamingNarrative + data.text,
+              status: "live",
+            }));
+          }
+          // keepalive or unknown: no state change
+        } catch {
+          // malformed message — ignore
+        }
+      };
+
+      es.addEventListener("done", (event) => {
+        const raw = (event as MessageEvent).data;
+        try {
+          const data = JSON.parse(raw);
+          if (data.type === "synthesis") {
             const flags: Flag[] = data.flags ?? [];
             const cycleTs = new Date();
             const highCount = flags.filter((f) => f.severity === "high").length;
@@ -92,21 +114,27 @@ export function useArgusStream(): StreamState {
               flags,
               allFlags: [...newFlagEntries, ...s.allFlags].slice(0, 200),
               narrative: data.narrative ?? "",
+              streamingNarrative: "",
+              isStreaming: false,
               lastUpdated: cycleTs,
               status: "live",
               entries: [newEntry, ...s.entries].slice(0, 50),
             }));
           }
-          // keepalive: no state change
         } catch {
-          // malformed message — ignore
+          // Empty data or parse error — just clear streaming state
+          setState((s) => ({
+            ...s,
+            streamingNarrative: "",
+            isStreaming: false,
+          }));
         }
-      };
+      });
 
       es.onerror = () => {
         es.close();
         esRef.current = null;
-        setState((s) => ({ ...s, status: "error" }));
+        setState((s) => ({ ...s, status: "error", isStreaming: false, streamingNarrative: "" }));
 
         const delay = backoffRef.current;
         backoffRef.current = Math.min(delay * 2, MAX_BACKOFF);

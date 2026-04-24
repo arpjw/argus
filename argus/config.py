@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 ANTHROPIC_API_KEY: str = os.environ["ANTHROPIC_API_KEY"]
+TELEGRAM_ENABLED: bool = os.getenv("TELEGRAM_ENABLED", "false").lower() in ("1", "true", "yes")
 TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
 KALSHI_API_KEY: str = os.getenv("KALSHI_API_KEY", "")

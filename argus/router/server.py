@@ -18,7 +18,8 @@ from argus.connectors import kalshi as kalshi_connector
 from argus.connectors.prices import price_buffer
 import argus.coordinator.main as coordinator_module
 from argus.coordinator.main import broadcast_queue, run as coordinator_run
-from argus.synthesis.claude import SynthesisResult
+from argus.router.query import router as query_router
+from argus.synthesis.claude import SynthesisResult, synthesis_queue
 
 logger = logging.getLogger("argus.router")
 
@@ -30,6 +31,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(query_router)
 
 latest_synthesis: SynthesisResult | None = None
 
@@ -151,21 +154,23 @@ async def stream():
         try:
             while True:
                 try:
-                    result: SynthesisResult = await asyncio.wait_for(
-                        broadcast_queue.get(), timeout=30
-                    )
-                    latest_synthesis = result
-                    payload = json.dumps(
-                        {
+                    item = await asyncio.wait_for(synthesis_queue.get(), timeout=15)
+                    if isinstance(item, str):
+                        yield f"data: {json.dumps({'type': 'token', 'text': item})}\n\n"
+                    elif isinstance(item, SynthesisResult):
+                        latest_synthesis = item
+                        payload = json.dumps({
                             "type": "synthesis",
-                            "timestamp": result.timestamp.isoformat(),
-                            "flags": result.flags,
-                            "narrative": result.narrative,
-                        }
-                    )
-                    yield f"data: {payload}\n\n"
+                            "timestamp": item.timestamp.isoformat(),
+                            "flags": item.flags,
+                            "narrative": item.narrative,
+                        })
+                        yield f"event: done\ndata: {payload}\n\n"
+                    else:
+                        # None sentinel — synthesis error
+                        yield "event: done\ndata: \n\n"
                 except asyncio.TimeoutError:
-                    yield 'data: {"type": "keepalive"}\n\n'
+                    yield ": keepalive\n\n"
         except GeneratorExit:
             logger.info("SSE client disconnected")
             return
@@ -240,6 +245,12 @@ async def analyze(req: AnalyzeRequest):
     )
 
 
+async def _drain_broadcast_queue():
+    while True:
+        await broadcast_queue.get()
+
+
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(coordinator_run())
+    asyncio.create_task(_drain_broadcast_queue())

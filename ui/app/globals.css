@@ -34,3 +34,14 @@ body {
 .feed-entry {
   animation: feed-fade-in 300ms ease-in-out;
 }
+
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.cursor-blink {
+  animation: cursor-blink 1s step-end infinite;
+  color: #e5e5e5;
+  font-weight: 400;
+}

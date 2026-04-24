@@ -3,8 +3,22 @@ from __future__ import annotations
 from argus.connectors.types import DataSnapshot, OHLCVBar, MacroRelease, KalshiMarket, NewsItem
 from argus.engines.types import AnomalyFlag, SentimentScore
 from argus.engines.regime import RegimeResult
+from argus.engines.event_detector import EventSignal
 
 _SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+
+
+def _format_signal(sig: EventSignal) -> str:
+    ts = sig.timestamp.strftime("%H:%M UTC")
+    if sig.trigger_type == "price_spike":
+        return f"TRIGGERED BY: {sig.instrument} price spike {sig.magnitude:+.1%} ({ts})"
+    if sig.trigger_type == "volume_anomaly":
+        return f"TRIGGERED BY: {sig.instrument} volume anomaly {sig.magnitude:.1f}x avg ({ts})"
+    if sig.trigger_type == "vix_spike":
+        return f"TRIGGERED BY: {sig.instrument} VIX spike {sig.magnitude:+.1f} pts ({ts})"
+    if sig.trigger_type == "cross_asset_divergence":
+        return f"TRIGGERED BY: {sig.instrument} cross-asset divergence {sig.magnitude:+.1%} ({ts})"
+    return f"TRIGGERED BY: {sig.instrument} {sig.trigger_type} {sig.magnitude:.4f} ({ts})"
 
 
 def pack_context(
@@ -18,8 +32,16 @@ def pack_context(
     calendar_snapshot: DataSnapshot | None = None,
     cot_snapshot: DataSnapshot | None = None,
     regime_result: RegimeResult | None = None,
+    triggered_events: list[EventSignal] | None = None,
 ) -> str:
     sections: list[str] = []
+
+    # --- TRIGGER ---
+    if triggered_events:
+        trigger_lines = ["--- TRIGGER ---"]
+        for sig in triggered_events:
+            trigger_lines.append(_format_signal(sig))
+        sections.append("\n".join(trigger_lines))
 
     # --- MACRO REGIME ---
     if regime_result is not None:
