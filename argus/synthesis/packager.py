@@ -31,6 +31,7 @@ def pack_context(
     prev_price_snapshot: DataSnapshot | None = None,
     calendar_snapshot: DataSnapshot | None = None,
     cot_snapshot: DataSnapshot | None = None,
+    options_snapshot: DataSnapshot | None = None,
     regime_result: RegimeResult | None = None,
     triggered_events: list[EventSignal] | None = None,
 ) -> str:
@@ -186,6 +187,30 @@ def pack_context(
                     f" | Spec NET {spec_net:+,} (z: {z:+.1f}σ){extreme_tag}"
                 )
             sections.append("\n".join(cot_lines))
+
+    # --- OPTIONS FLOW ---
+    if options_snapshot is not None:
+        opt_flows: list[dict] = options_snapshot.payload.get("flows", [])
+        if opt_flows:
+            top_flows = sorted(
+                opt_flows,
+                key=lambda f: float(f.get("premium", 0) or 0),
+                reverse=True,
+            )[:5]
+            options_lines = ["--- OPTIONS FLOW ---"]
+            for f in top_flows:
+                side_tag = str(f.get("side", "") or "").upper() or "?"
+                ticker = str(f.get("ticker", "?") or "?")
+                premium_k = int(float(f.get("premium", 0) or 0)) // 1000
+                strike = float(f.get("strike", 0) or 0)
+                expiry = str(f.get("expiry", "?") or "?")
+                dte = int(f.get("dte", 0) or 0)
+                sentiment = str(f.get("sentiment", "neutral") or "neutral")
+                options_lines.append(
+                    f"[{side_tag}] {ticker} ${premium_k}k @ {strike:g}"
+                    f" exp {expiry} ({dte}d) — {sentiment}"
+                )
+            sections.append("\n".join(options_lines))
 
     output = "\n\n".join(sections)
 

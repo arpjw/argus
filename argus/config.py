@@ -10,6 +10,7 @@ TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
 KALSHI_API_KEY: str = os.getenv("KALSHI_API_KEY", "")
 KALSHI_PRIVATE_KEY: str = os.getenv("KALSHI_PRIVATE_KEY", "")
 FRED_API_KEY: str = os.getenv("FRED_API_KEY", "")
+UNUSUAL_WHALES_API_KEY: str = os.getenv("UNUSUAL_WHALES_API_KEY", "")
 NORGATE_DATA_PATH: str = os.getenv("NORGATE_DATA_PATH", "")
 
 SIGMA_THRESHOLD: float = float(os.getenv("SIGMA_THRESHOLD", "2.0"))

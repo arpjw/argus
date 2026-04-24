@@ -231,6 +231,95 @@ class AnomalyEngine:
                     )
         return flags
 
+    async def check_options_flow(
+        self,
+        options_snapshot: DataSnapshot | None,
+    ) -> list[AnomalyFlag]:
+        flags: list[AnomalyFlag] = []
+        if options_snapshot is None:
+            return flags
+
+        flows: list[dict] = options_snapshot.payload.get("flows", [])
+        if not flows:
+            return flags
+
+        ts = options_snapshot.timestamp
+
+        for flow in flows:
+            try:
+                premium = float(flow.get("premium", 0) or 0)
+                instrument = str(flow.get("instrument", flow.get("ticker", "UNKNOWN")) or "UNKNOWN")
+                side = str(flow.get("side", "") or "")
+                sentiment = str(flow.get("sentiment", "neutral") or "neutral")
+                expiry = str(flow.get("expiry", "") or "")
+                strike = float(flow.get("strike", 0) or 0)
+                dte = int(flow.get("dte", 0) or 0)
+                ticker = str(flow.get("ticker", instrument) or instrument)
+
+                if premium > 2_000_000:
+                    severity = "high"
+                elif premium > 1_000_000:
+                    severity = "medium"
+                elif premium > 500_000:
+                    severity = "low"
+                else:
+                    continue
+
+                premium_k = int(premium) // 1000
+                desc = (
+                    f"{ticker} {side.upper()} ${premium_k}k"
+                    f" @ {strike:g} exp {expiry} ({dte}d) — {sentiment}"
+                )
+                flags.append(
+                    AnomalyFlag(
+                        instrument=instrument,
+                        type="options_flow",
+                        severity=severity,
+                        description=desc,
+                        timestamp=ts,
+                    )
+                )
+            except (TypeError, ValueError):
+                continue
+
+        total = len(flows)
+        if total > 0:
+            put_count = sum(
+                1 for f in flows if str(f.get("side", "") or "").lower() == "put"
+            )
+            call_count = sum(
+                1 for f in flows if str(f.get("side", "") or "").lower() == "call"
+            )
+
+            if put_count / total > 0.70:
+                flags.append(
+                    AnomalyFlag(
+                        instrument="OPTIONS",
+                        type="bearish_sweep",
+                        severity="medium",
+                        description=(
+                            f"Bearish options sweep: {put_count}/{total} flows are puts"
+                            f" ({put_count / total:.0%})"
+                        ),
+                        timestamp=ts,
+                    )
+                )
+            elif call_count / total > 0.70:
+                flags.append(
+                    AnomalyFlag(
+                        instrument="OPTIONS",
+                        type="bullish_sweep",
+                        severity="medium",
+                        description=(
+                            f"Bullish options sweep: {call_count}/{total} flows are calls"
+                            f" ({call_count / total:.0%})"
+                        ),
+                        timestamp=ts,
+                    )
+                )
+
+        return flags
+
     # ------------------------------------------------------------------
     # orchestrator
     # ------------------------------------------------------------------

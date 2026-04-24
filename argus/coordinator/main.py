@@ -7,6 +7,7 @@ from argus.connectors.fred import fetch_snapshot as fetch_fred
 from argus.connectors.kalshi import fetch_snapshot as fetch_kalshi
 from argus.connectors.calendar import fetch_snapshot as fetch_calendar
 from argus.connectors.cot import fetch_snapshot as fetch_cot
+from argus.connectors.options import fetch_snapshot as fetch_options
 from argus.connectors.news import poller as news_poller
 from argus.engines.anomaly import AnomalyEngine
 from argus.engines.sentiment import SentimentScorer
@@ -38,12 +39,13 @@ async def run_cycle(
 ) -> SynthesisResult | None:
     global prev_price_snapshot, prev_kalshi_snapshot, latest_kalshi_snapshot, latest_context
 
-    price, fred, kalshi, calendar, cot = await asyncio.gather(
+    price, fred, kalshi, calendar, cot, options = await asyncio.gather(
         fetch_prices(),
         fetch_fred(),
         fetch_kalshi(),
         fetch_calendar(),
         fetch_cot(),
+        fetch_options(),
         return_exceptions=True,
     )
 
@@ -62,6 +64,9 @@ async def run_cycle(
     if isinstance(cot, Exception):
         logger.warning("fetch_cot failed: %s", cot)
         cot = None
+    if isinstance(options, Exception):
+        logger.warning("fetch_options failed: %s", options)
+        options = None
 
     if price is None or fred is None or kalshi is None:
         return None
@@ -72,6 +77,12 @@ async def run_cycle(
             sentiment_scorer.run_all, kalshi, prev_kalshi_snapshot, news_items
         ),
     )
+
+    try:
+        options_flags = await anomaly_engine.check_options_flow(options)
+        anomaly_flags = list(anomaly_flags) + options_flags
+    except Exception as exc:
+        logger.warning("check_options_flow failed: %s", exc)
 
     regime_result = regime_classifier.classify(fred, price)
 
@@ -85,6 +96,7 @@ async def run_cycle(
         prev_price_snapshot=prev_price_snapshot,
         calendar_snapshot=calendar,
         cot_snapshot=cot,
+        options_snapshot=options,
         regime_result=regime_result,
         triggered_events=triggered_events,
     )
